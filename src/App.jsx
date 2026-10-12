@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 
-const API = "http://localhost:3000/api";
+const API = "https://smart-parking-backend-x7nc.onrender.com/api";
 
 export default function App() {
   const [slots, setSlots] = useState([]);
@@ -14,11 +14,48 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
+  function getId(slot) {
+    return slot.id ?? slot.slotId ?? slot.slot_id;
+  }
+
+  function getName(slot, index) {
+    return (
+      slot.slotNumber ??
+      slot.slot_name ??
+      slot.name ??
+      slot.slotId ??
+      slot.slot_id ??
+      slot.id ??
+      `P${String(index + 1).padStart(2, "0")}`
+    );
+  }
+
+  function occupied(slot) {
+    return (
+      slot.occupied === 1 ||
+      slot.occupied === true ||
+      String(slot.occupied).toLowerCase() === "true" ||
+      String(slot.status).toLowerCase() === "occupied"
+    );
+  }
+
+  function vehicle(slot) {
+    return (
+      slot.vehicleNumber ??
+      slot.vehicle_number ??
+      slot.vehicle_no ??
+      ""
+    );
+  }
+
   async function loadSlots() {
     try {
       const res = await fetch(`${API}/slots`);
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not load slots");
+
+      if (!res.ok) {
+        throw new Error(data.error || "Could not load parking slots");
+      }
 
       setSlots(Array.isArray(data) ? data : data.slots || []);
       setError("");
@@ -32,15 +69,18 @@ export default function App() {
   async function loadHistory() {
     try {
       const res = await fetch(`${API}/history?t=${Date.now()}`, {
-        cache: "no-store"
+        cache: "no-store",
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Could not load history");
+
+      if (!res.ok) {
+        throw new Error(data.error || "Could not load parking history");
+      }
 
       setHistory(Array.isArray(data) ? data : data.history || []);
       setHistoryError("");
     } catch (e) {
-      setHistoryError(e.message || "Could not load history");
+      setHistoryError(e.message || "Could not load parking history");
     }
   }
 
@@ -52,24 +92,6 @@ export default function App() {
     refresh();
   }, []);
 
-  function getId(slot) {
-    return slot.id ?? slot.slotId ?? slot.slot_id;
-  }
-
-  function getName(slot, index) {
-    return slot.slotNumber ?? slot.slot_name ?? slot.name ??
-      slot.slotId ?? slot.slot_id ?? slot.id ??
-      `P${String(index + 1).padStart(2, "0")}`;
-  }
-
-  function occupied(slot) {
-    return String(slot.status || "").toLowerCase() === "occupied";
-  }
-
-  function vehicle(slot) {
-    return slot.vehicleNumber ?? slot.vehicle_number ?? slot.vehicle_no ?? "";
-  }
-
   async function updateSlot(slot, status, vehicleNumber = null) {
     setBusy(true);
     setNotice("");
@@ -78,19 +100,20 @@ export default function App() {
       const res = await fetch(`${API}/slots/${getId(slot)}`, {
         method: "PATCH",
         headers: {
-          "Content-Type": "application/json"
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           status,
+          occupied: status === "Occupied" ? 1 : 0,
           vehicleNumber,
-          vehicle_number: vehicleNumber
-        })
+          vehicle_number: vehicleNumber,
+        }),
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || "Unable to update slot");
+        throw new Error(data.error || "Unable to update parking slot");
       }
 
       setNotice(
@@ -112,10 +135,11 @@ export default function App() {
     if (!window.confirm("Reset all parking slots?")) return;
 
     setBusy(true);
+    setNotice("");
 
     try {
       const res = await fetch(`${API}/reset`, {
-        method: "POST"
+        method: "POST",
       });
 
       const data = await res.json();
@@ -133,9 +157,6 @@ export default function App() {
     }
   }
 
-  const occupiedCount = slots.filter(occupied).length;
-  const availableCount = slots.length - occupiedCount;
-
   function date(value) {
     if (!value) return "—";
 
@@ -145,6 +166,9 @@ export default function App() {
       ? String(value)
       : parsed.toLocaleString();
   }
+
+  const occupiedCount = slots.filter(occupied).length;
+  const availableCount = slots.length - occupiedCount;
 
   return (
     <main className="parking-app">
@@ -195,7 +219,7 @@ export default function App() {
         <div className="section-heading">
           <div>
             <h2>Parking Overview</h2>
-            <p>Select an available slot to park your vehicle.</p>
+            <p>Select an available slot and enter your vehicle number.</p>
           </div>
 
           <div className="legend">
@@ -222,7 +246,6 @@ export default function App() {
               >
                 <div className="slot-top">
                   <span className="parking-icon">P</span>
-
                   <span
                     className={`status-pill ${
                       isFull ? "pill-red" : "pill-green"
@@ -251,17 +274,17 @@ export default function App() {
                         aria-label={`Vehicle number for ${getName(slot, index)}`}
                         autoComplete="off"
                         value={vehicles[id] ?? ""}
-                        onChange={(e) => {
+                        onChange={(e) =>
                           setVehicles((old) => ({
                             ...old,
-                            [id]: e.target.value
-                          }));
-                        }}
+                            [id]: e.target.value,
+                          }))
+                        }
                       />
 
                       <button
                         className="occupy-button"
-                        disabled={busy}
+                        disabled={busy || id == null}
                         onClick={() => {
                           const number = (vehicles[id] ?? "")
                             .trim()
@@ -281,7 +304,7 @@ export default function App() {
                   ) : (
                     <button
                       className="release-button"
-                      disabled={busy}
+                      disabled={busy || id == null}
                       onClick={() => updateSlot(slot, "Available")}
                     >
                       Release Slot
@@ -317,10 +340,15 @@ export default function App() {
                   return (
                     <tr key={item.id ?? index}>
                       <td>
-                        {item.slotId ?? item.slot_id ?? item.slotNumber ?? "—"}
+                        {item.slotId ??
+                          item.slot_id ??
+                          item.slotNumber ??
+                          "—"}
                       </td>
                       <td>
-                        {item.vehicleNumber ?? item.vehicle_number ?? "—"}
+                        {item.vehicleNumber ??
+                          item.vehicle_number ??
+                          "—"}
                       </td>
                       <td>{date(item.entryTime ?? item.entry_time)}</td>
                       <td>{date(exit)}</td>
